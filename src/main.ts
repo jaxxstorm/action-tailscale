@@ -58,7 +58,7 @@ async function run(): Promise<void> {
       finalVersion = await fetchLatestFromChannel(finalChannel);
       core.info(`Using channel='${finalChannel}' => latest version=${finalVersion}`);
     } else {
-      // No channel => we rely on the 'version' input
+      // No channel => rely on the 'version' input
       if (!versionInput) {
         // No channel and no version => default to stable-latest
         finalVersion = await fetchLatestFromChannel('stable');
@@ -68,31 +68,24 @@ async function run(): Promise<void> {
         finalVersion = await fetchLatestFromChannel('stable');
         core.info(`version=latest => stable-latest => ${finalVersion}`);
       } else {
-        // A specific version (e.g. 1.40.0)
+        // A specific version (e.g. 1.80.0)
         finalVersion = versionInput;
         core.info(`Using specified version='${finalVersion}' from stable channel`);
       }
     }
 
-    // We'll build a download URL from pkgs.tailscale.com/<finalChannel>
-    // EXCEPT if user provided a specific version and no channel => we assume stable channel..
-    let baseURL = `https://pkgs.tailscale.com/${finalChannel}`;
+    // Build base URL from pkgs.tailscale.com/<channel>
     // If the user didn't explicitly pick channel=unstable, we default to stable
-    // (even for a specific version).
+    let baseURL = `https://pkgs.tailscale.com/${finalChannel}`;
 
-    const { platform, arch, archiveExt } = getPlatformInfo(runnerOS, runnerArch);
-    if (!platform) {
-      core.setFailed(`Unsupported runner OS/arch: OS=${runnerOS}, ARCH=${runnerArch}`);
+    // We get the correct filename based on OS and arch
+    const { fileName, isWindowsInstaller, needExtract } = getPlatformFile(runnerOS, runnerArch, finalVersion);
+    if (!fileName) {
+      core.setFailed(`Unsupported OS/arch combination: OS=${runnerOS}, ARCH=${runnerArch}`);
       return;
     }
 
-    // Example filenames:
-    //   - Linux .tgz: tailscale_1.40.0_linux_amd64.tgz
-    //   - macOS .tgz: tailscale_1.40.0_darwin_amd64.tgz
-    //   - Windows .zip: tailscale_1.40.0_windows_amd64.zip
-    const fileName = `tailscale_${finalVersion}_${platform}_${arch}.${archiveExt}`;
     const downloadURL = `${baseURL}/${fileName}`;
-
     core.info(`Downloading Tailscale from: ${downloadURL}`);
     const downloadPath = await tc.downloadTool(downloadURL);
 
@@ -121,27 +114,39 @@ async function run(): Promise<void> {
       core.warning('No SHA256 provided or fetched; skipping checksum validation.');
     }
 
-    // Extract the archive
-    let extractDir = '';
-    if (archiveExt === 'tgz') {
-      extractDir = await tc.extractTar(downloadPath);
-    } else if (archiveExt === 'zip') {
-      extractDir = await tc.extractZip(downloadPath);
-    } else {
-      throw new Error(`Unsupported archive format: ${archiveExt}`);
-    }
-    // Remove the original .tgz/.zip
-    fs.unlinkSync(downloadPath);
+    // If Windows installer, run it, else ephemeral extraction
+    if (isWindowsInstaller && runnerOS === 'Windows') {
+      core.info(`Installing Tailscale on Windows via ${fileName} ...`);
+      await exec.exec(downloadPath, ['/quiet']);
+      // You could remove the downloaded file if you like:
+      // fs.unlinkSync(downloadPath);
+      core.info('Tailscale installed as a system service on Windows.');
+    } else if (needExtract) {
+      // Extract
+      let extractDir = '';
+      if (fileName.endsWith('.tgz') || fileName.endsWith('.tar.gz')) {
+        extractDir = await tc.extractTar(downloadPath);
+      } else if (fileName.endsWith('.zip')) {
+        extractDir = await tc.extractZip(downloadPath);
+      } else {
+        throw new Error(`Unsupported archive extension for ephemeral usage: ${fileName}`);
+      }
+      fs.unlinkSync(downloadPath);
 
-    // Add the extracted folder to PATH so `tailscale` is accessible
-    core.addPath(extractDir);
+      // Add the extracted folder to PATH so `tailscale` is accessible
+      core.addPath(extractDir);
 
-    // Start tailscaled in background (if present
-    const tailscaledPath = path.join(extractDir, getTailscaledBinaryName(runnerOS));
-    if (fs.existsSync(tailscaledPath)) {
-      await startEphemeralTailscaled(tailscaledPath, stateDir, tailscaledArgs);
+      // Start tailscaled in background (if present)
+      const tailscaledPath = path.join(extractDir, getTailscaledBinaryName(runnerOS));
+      if (fs.existsSync(tailscaledPath)) {
+        await startEphemeralTailscaled(tailscaledPath, stateDir, tailscaledArgs);
+      } else {
+        core.warning(`tailscaled not found at: ${tailscaledPath}. Skipping daemon startup.`);
+      }
     } else {
-      core.warning(`tailscaled not found at: ${tailscaledPath}. Skipping daemon startup.`);
+      // Possibly an unsupported scenario
+      fs.unlinkSync(downloadPath);
+      core.warning('No extraction or installer run. Nothing done. (Check your OS or version).');
     }
 
     // tailscale up
@@ -171,6 +176,62 @@ async function run(): Promise<void> {
   } catch (err: any) {
     core.setFailed(err.message);
   }
+}
+
+/**
+ * Returns the correct Tailscale filename depending on OS and arch.
+ * e.g. 
+ *   Linux => tailscale_VERSION_amd64.tgz
+ *   macOS => Tailscale-VERSION-macos[-arm64].zip
+ *   Windows => tailscale-setup-VERSION.exe (system installer)
+ */
+function getPlatformFile(os: string, arch: string, version: string) {
+  // Return { fileName, isWindowsInstaller, needExtract }
+  // "isWindowsInstaller" => run a .exe to install system-wide
+  // "needExtract" => we do ephemeral extraction
+  // If both are false => no action
+
+  if (os === 'Linux') {
+    let tsArch = 'amd64';
+    if (arch === 'ARM64') tsArch = 'arm64';
+    else if (arch === 'ARM') tsArch = 'arm';
+    else if (arch === 'X86') tsArch = '386';
+    return {
+      fileName: `tailscale_${version}_${tsArch}.tgz`,
+      isWindowsInstaller: false,
+      needExtract: true
+    };
+  }
+  else if (os === 'macOS') {
+    if (arch === 'ARM64') {
+      return {
+        fileName: `Tailscale-${version}-macos-arm64.zip`,
+        isWindowsInstaller: false,
+        needExtract: true
+      };
+    } else {
+      return {
+        fileName: `Tailscale-${version}-macos.zip`,
+        isWindowsInstaller: false,
+        needExtract: true
+      };
+    }
+  }
+  else if (os === 'Windows') {
+    // E.g. tailscale-setup-1.80.0.exe
+    // This is a system installer, not ephemeral
+    return {
+      fileName: `tailscale-setup-${version}.exe`,
+      isWindowsInstaller: true,
+      needExtract: false
+    };
+  }
+
+  return {
+    fileName: '',
+    isWindowsInstaller: false,
+    needExtract: false
+  };
 }
 
 /**
@@ -217,36 +278,7 @@ async function computeFileSha256(filePath: string): Promise<string> {
 }
 
 /**
- * Return platform/arch + archive extension for the Tailscale file name.
- * e.g. macOS => "darwin", Linux => "linux", Windows => "windows".
- * e.g. X64 => "amd64", ARM64 => "arm64", etc.
- */
-function getPlatformInfo(os: string, arch: string) {
-  let platform = '';
-  let tsArch = '';
-  let archiveExt = 'tgz';
-
-  // OS => platform
-  if (os === 'Linux') platform = 'linux';
-  else if (os === 'macOS') platform = 'darwin';
-  else if (os === 'Windows') {
-    platform = 'windows';
-    archiveExt = 'zip'; // Tailscale provides .zip for Windows
-  }
-
-  // ARCH => tailscale arch
-  switch (arch) {
-    case 'ARM64': tsArch = 'arm64'; break;
-    case 'ARM':   tsArch = 'arm';   break;
-    case 'X86':   tsArch = '386';   break;
-    default:      tsArch = 'amd64'; break;
-  }
-
-  return { platform, arch: tsArch, archiveExt };
-}
-
-/**
- * Start tailscaled in the background if we have a separate daemon binary.
+ * Start tailscaled in the background if we have a separate daemon binary (Linux/macOS ephemeral).
  */
 async function startEphemeralTailscaled(
   daemonPath: string,
@@ -272,7 +304,7 @@ async function startEphemeralTailscaled(
   } as SpawnOptions);
   proc.unref();
 
-  // Give the daemon a second to start, then we'll do a best-effort "tailscale status"
+  // Give the daemon a second to start, then best-effort "tailscale status"
   await new Promise(r => setTimeout(r, 2000));
   try {
     await exec.exec('tailscale', ['status', '--json']);
@@ -282,7 +314,7 @@ async function startEphemeralTailscaled(
 }
 
 /**
- * On success, resolve. On timeout, kill the process and reject.
+ * Run a command with a timeout in ms. If it doesn't finish, we kill it and reject.
  */
 async function runWithTimeout(command: string, args: string[], timeoutMs: number): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -354,7 +386,8 @@ function parseDurationToMs(d: string): number {
 }
 
 /** 
- * A minimal argument splitter that respects quoted segments.
+ * Splits a string by whitespace, respecting quoted segments,
+ * e.g. '--foo "value with spaces"'
  */
 function splitArgs(argString: string): string[] {
   if (!argString) return [];
