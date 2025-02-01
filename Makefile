@@ -39,5 +39,5 @@ format:
 
 # Run the action locally (for testing purposes)
 run: build
-	node $(BUILD_DIR)/index.js
+	node $(BUILD_DIR)/main.js
 

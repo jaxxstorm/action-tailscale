@@ -52,4 +52,4 @@ inputs:
 
 runs:
   using: 'node20'
-  main: 'lib/index.js'
+  main: 'lib/main.js'
