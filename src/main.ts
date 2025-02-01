@@ -13,7 +13,8 @@ async function run(): Promise<void> {
     const extraUpArgs = core.getInput('args') || '';
     const runnerOS = process.env.RUNNER_OS || '';
     const tailscaleRef = versionInput.toLowerCase() === 'latest' ? 'main' : `v${versionInput.replace(/^v/, '')}`;
-    await exec.exec('go', ['install', `tailscale.com/cmd/tailscale${','}tailscaled@${tailscaleRef}`]);
+    await exec.exec('go', ['install', `tailscale.com/cmd/tailscaled@${tailscaleRef}`]);
+    await exec.exec('go', ['install', `tailscale.com/cmd/tailscale@${tailscaleRef}`]);
     const gopath = await getGoPath();
     const binDir = path.join(gopath, 'bin');
     const tailscaleBin = path.join(binDir, 'tailscale');
