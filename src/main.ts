@@ -114,7 +114,17 @@ async function run(): Promise<void> {
       fs.renameSync(downloadPath, pkgPath);
       await exec.exec('sudo', ['installer', '-pkg', pkgPath, '-target', '/']);
       core.info('macOS Tailscale installed as a system service.');
+      // Optionally remove pkg
       // fs.unlinkSync(pkgPath);
+
+      // ALIAS: Link Tailscale app path to /usr/local/bin/tailscale
+      // so spawn("tailscale") works. Tailscale is typically installed in /Applications.
+      core.info('Symlinking /Applications/Tailscale.app/Contents/MacOS/Tailscale => /usr/local/bin/tailscale');
+      await exec.exec('sudo', [
+        'ln', '-sf',
+        '/Applications/Tailscale.app/Contents/MacOS/Tailscale',
+        '/usr/local/bin/tailscale'
+      ]);
     }
     // 3) Linux => ephemeral .tgz
     else if (isLinuxTgz) {
@@ -169,12 +179,11 @@ async function run(): Promise<void> {
 
     core.info(`Running 'tailscale up' with timeout=${timeoutMs} ms...`);
 
-    // On Linux ephemeral, we likely need sudo
-    // On macOS/Windows, tailscale is system-installed so we can just do "tailscale up",
-    // but let's keep it consistent with the original approach.
     if (runnerOS === 'Linux') {
+      // On Linux ephemeral, we likely need sudo for networking
       await runWithTimeout('sudo', ['tailscale', ...upArgs], timeoutMs);
     } else {
+      // macOS & Windows
       await runWithTimeout('tailscale', upArgs, timeoutMs);
     }
 
