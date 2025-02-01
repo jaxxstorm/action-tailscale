@@ -115,15 +115,23 @@ async function run(): Promise<void> {
       await exec.exec('sudo', ['installer', '-pkg', pkgPath, '-target', '/']);
       core.info('macOS Tailscale installed as a system service.');
 
+      // Load the Tailscale daemon
+      //
+      const tailscalePlist = '/Library/LaunchDaemons/com.tailscale.tailscaled.plist';
+      core.info(`Loading Tailscale daemon via launchctl: ${tailscalePlist} ...`);
+      await exec.exec('sudo', ['launchctl', 'load', '-w', tailscalePlist]);
+      await exec.exec('sudo', ['launchctl', 'start', 'com.tailscale.tailscaled']);
+      core.info('macOS Tailscale daemon started.');
+      // fs.unlinkSync(pkgPath);
+
     }
-    //Linux => ephemeral .tgz
+    // Linux => ephemeral .tgz
     else if (isLinuxTgz) {
       core.info('Using ephemeral .tgz approach on Linux...');
       const extractDir = await tc.extractTar(downloadPath);
       fs.unlinkSync(downloadPath);
 
       // The tar typically has a subdir named tailscale_VERSION_ARCH/
-      // So let's see if that subdir exists:
       const subDirName = `tailscale_${finalVersion}_${mapArch(runnerArch)}`;
       const subDirPath = path.join(extractDir, subDirName);
       if (fs.existsSync(subDirPath)) {
@@ -173,8 +181,12 @@ async function run(): Promise<void> {
       // On Linux ephemeral, we likely need sudo for networking
       await runWithTimeout('sudo', ['tailscale', ...upArgs], timeoutMs);
     } else if (runnerOS === 'macOS') {
-      // Instead of calling "tailscale" from PATH,
-      // we forcibly call the .app's binary:
+      // If your .pkg installs an actual 'tailscale' CLI in /usr/local/bin,
+      // you can do:
+      //
+      //   await runWithTimeout('tailscale', upArgs, timeoutMs);
+      //
+      // or if you want to invoke the .app binary directly:
       const tailscaleAppBin = '/Applications/Tailscale.app/Contents/MacOS/Tailscale';
       await runWithTimeout(tailscaleAppBin, upArgs, timeoutMs);
     } else {
@@ -188,13 +200,7 @@ async function run(): Promise<void> {
   }
 }
 
-// Decide what filename to download for each OS/arch
 function getTailscaleFilename(os: string, arch: string, version: string) {
-  // Return an object with the final filename plus flags
-  // e.g. Windows => `tailscale-setup-1.80.0.exe`
-  //      macOS => `Tailscale-1.80.0-macos.pkg`
-  //      Linux => `tailscale_1.80.0_amd64.tgz`
-
   if (os === 'Windows') {
     return {
       fileName: `tailscale-setup-${version}.exe`,
@@ -223,19 +229,16 @@ function getTailscaleFilename(os: string, arch: string, version: string) {
   return { fileName: '', isWinExe: false, isMacPkg: false, isLinuxTgz: false };
 }
 
-// Simple helper to map "X64" => "amd64", "ARM64" => "arm64", etc.
 function mapArch(runnerArch: string): string {
   switch (runnerArch) {
     case 'ARM64': return 'arm64';
     case 'ARM':   return 'arm';
     case 'X86':   return '386';
-    default:      return 'amd64'; // includes X64 case
+    default:      return 'amd64'; // includes X64
   }
 }
 
-/** 
- * Download .sha256 from pkgs.tailscale.com
- */
+/** Download .sha256 from pkgs.tailscale.com */
 async function fetchRemoteSha256(url: string): Promise<string> {
   const http = new HttpClient('ts-action');
   const res = await http.get(url);
@@ -245,22 +248,18 @@ async function fetchRemoteSha256(url: string): Promise<string> {
   return (await res.readBody()).trim();
 }
 
-/**
- * Compute SHA256 of a file on disk
- */
+/** Compute SHA256 of a file on disk */
 async function computeFileSha256(filePath: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const hash = crypto.createHash('sha256');
     const stream = fs.createReadStream(filePath);
-    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('data', chunk => hash.update(chunk));
     stream.on('error', reject);
-    stream.on('end', () => {
-      resolve(hash.digest('hex'));
-    });
+    stream.on('end', () => resolve(hash.digest('hex')));
   });
 }
 
-// Fetch latest from stable or unstable channel
+/** Fetch the latest from stable or unstable channel */
 async function fetchLatestFromChannel(channel: 'stable'|'unstable'): Promise<string> {
   const http = new HttpClient('ts-action');
   const url = `https://pkgs.tailscale.com/${channel}/?mode=json`;
@@ -276,10 +275,7 @@ async function fetchLatestFromChannel(channel: 'stable'|'unstable'): Promise<str
   return data.Version;
 }
 
-/**
- * Start tailscaled in the background if we have it. 
- * Only relevant for ephemeral Linux usage in this example.
- */
+/** Start ephemeral tailscaled on Linux after extracting. */
 async function startEphemeralTailscaled(
   daemonPath: string,
   stateDir: string,
@@ -305,7 +301,7 @@ async function startEphemeralTailscaled(
   } as SpawnOptions);
   proc.unref();
 
-  // Quick wait, then "sudo tailscale status"
+  // Quick wait, then 'sudo tailscale status'
   await new Promise(r => setTimeout(r, 4000));
   try {
     await exec.exec('sudo', ['tailscale', 'status', '--json']);
@@ -314,9 +310,7 @@ async function startEphemeralTailscaled(
   }
 }
 
-/**
- * Run a command with a millisecond timeout. If it doesn't finish in time, kill & reject.
- */
+/** Run a command with a millisecond timeout */
 async function runWithTimeout(cmd: string, args: string[], timeoutMs: number): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     let timer: NodeJS.Timeout | null = null;
@@ -349,9 +343,7 @@ async function runWithTimeout(cmd: string, args: string[], timeoutMs: number): P
   });
 }
 
-/**
- * Use "hostname" or fallback
- */
+/** Use 'hostname' or fallback */
 async function readSystemHostname(): Promise<string> {
   try {
     const { stdout } = await exec.getExecOutput('hostname', [], { silent: true });
@@ -361,13 +353,11 @@ async function readSystemHostname(): Promise<string> {
   }
 }
 
-/**
- * Parse e.g. "2m", "30s", "250ms" => # of ms.
- */
+/** Convert "2m", "30s", "250ms" => milliseconds, default 2m if invalid */
 function parseDurationToMs(d: string): number {
   const match = /^(\d+)(ms|s|m|h)$/.exec(d.trim().toLowerCase());
   if (!match) {
-    return 2 * 60_000; // default 2m
+    return 120_000; // default 2min
   }
   const val = parseInt(match[1], 10);
   switch (match[2]) {
@@ -376,13 +366,10 @@ function parseDurationToMs(d: string): number {
     case 'm':  return val * 60_000;
     case 'h':  return val * 3_600_000;
   }
-  return 2 * 60_000;
+  return 120_000;
 }
 
-/**
- * Minimal argument splitter that respects quoted segments,
- * e.g. --foo "some val"
- */
+/** Minimal argument splitter that respects quoted segments, e.g. --foo "val" */
 function splitArgs(argString: string): string[] {
   if (!argString) return [];
   const regex = /[^\s"]+|"([^"]*)"/gi;
