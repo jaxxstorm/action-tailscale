@@ -109,10 +109,12 @@ async function run(): Promise<void> {
     // 2) macOS => run the .pkg installer
     else if (isMacPkg) {
       core.info('Installing Tailscale on macOS with .pkg ...');
-      // "sudo installer -pkg <file> -target /"
-      await exec.exec('sudo', ['installer', '-pkg', downloadPath, '-target', '/']);
+      // Rename so it ends with .pkg (macOS installer often needs correct extension)
+      const pkgPath = `${downloadPath}.pkg`;
+      fs.renameSync(downloadPath, pkgPath);
+      await exec.exec('sudo', ['installer', '-pkg', pkgPath, '-target', '/']);
       core.info('macOS Tailscale installed as a system service.');
-      // fs.unlinkSync(downloadPath);
+      // fs.unlinkSync(pkgPath);
     }
     // 3) Linux => ephemeral .tgz
     else if (isLinuxTgz) {
@@ -166,7 +168,15 @@ async function run(): Promise<void> {
     ].filter(Boolean);
 
     core.info(`Running 'tailscale up' with timeout=${timeoutMs} ms...`);
-    await runWithTimeout('tailscale', upArgs, timeoutMs);
+
+    // On Linux ephemeral, we likely need sudo
+    // On macOS/Windows, tailscale is system-installed so we can just do "tailscale up",
+    // but let's keep it consistent with the original approach.
+    if (runnerOS === 'Linux') {
+      await runWithTimeout('sudo', ['tailscale', ...upArgs], timeoutMs);
+    } else {
+      await runWithTimeout('tailscale', upArgs, timeoutMs);
+    }
 
     core.info('Tailscale connected successfully!');
   } catch (err: any) {
@@ -181,7 +191,6 @@ function getTailscaleFilename(os: string, arch: string, version: string) {
   //      macOS => `Tailscale-1.80.0-macos.pkg`
   //      Linux => `tailscale_1.80.0_amd64.tgz`
 
-  // 1) Windows .exe
   if (os === 'Windows') {
     return {
       fileName: `tailscale-setup-${version}.exe`,
@@ -190,7 +199,6 @@ function getTailscaleFilename(os: string, arch: string, version: string) {
       isLinuxTgz: false
     };
   }
-  // 2) macOS .pkg
   else if (os === 'macOS') {
     return {
       fileName: `Tailscale-${version}-macos.pkg`,
@@ -199,7 +207,6 @@ function getTailscaleFilename(os: string, arch: string, version: string) {
       isLinuxTgz: false
     };
   }
-  // 3) Linux .tgz
   else if (os === 'Linux') {
     const mapped = mapArch(arch);
     return {
@@ -281,6 +288,7 @@ async function startEphemeralTailscaled(
   }
 
   const daemonArgs = [
+    'sudo',
     daemonPath,
     stateArg,
     ...splitArgs(extraArgs)
@@ -293,10 +301,10 @@ async function startEphemeralTailscaled(
   } as SpawnOptions);
   proc.unref();
 
-  // Quick wait, then "tailscale status"
-  await new Promise(r => setTimeout(r, 2000));
+  // Quick wait, then "sudo tailscale status"
+  await new Promise(r => setTimeout(r, 4000));
   try {
-    await exec.exec('tailscale', ['status', '--json']);
+    await exec.exec('sudo', ['tailscale', 'status', '--json']);
   } catch (err) {
     core.warning(`tailscaled may not be ready yet: ${(err as Error).message}`);
   }
