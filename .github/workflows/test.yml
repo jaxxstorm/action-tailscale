@@ -19,6 +19,6 @@ jobs:
       - run: npm run build
       - uses: ./
         with:
-          repo: jaxxstorm/connecti
-          arch: amd64
-          cache: enable
+          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-client-secret: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+          tags: "tag:ci"

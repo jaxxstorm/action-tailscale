@@ -51,5 +51,5 @@ inputs:
     default: '2m'
 
 runs:
-  using: 'node16'
-  main: 'dist/index.js'
+  using: 'node20'
+  main: 'lib/index.js'
