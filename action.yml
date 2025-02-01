@@ -1,0 +1,55 @@
+name: 'Connect Tailscale'
+description: 'Connect your GitHub Action workflow to Tailscale'
+branding:
+  icon: 'arrow-right-circle'
+  color: 'gray-dark'
+
+inputs:
+  authkey:
+    description: 'Your Tailscale authentication key, from the admin panel.'
+    required: false
+    deprecationMessage: 'An OAuth API client https://tailscale.com/s/oauth-clients is recommended instead of an authkey'
+  oauth-client-id:
+    description: 'Your Tailscale OAuth Client ID.'
+    required: false
+  oauth-secret:
+    description: 'Your Tailscale OAuth Client Secret.'
+    required: false
+  tags:
+    description: 'Comma separated list of tags to be applied to nodes (OAuth client must have permission to apply these tags).'
+    required: false
+  version:
+    description: 'Tailscale version to use. Specify `latest` for the latest stable version.'
+    required: true
+  channel:
+    description: 'Tailscale channel to use. Specify `stable` for the latest stable version.'
+    required: false
+    default: 'stable'
+  sha256sum:
+    description: 'Expected SHA256 checksum of the tarball.'
+    required: false
+    default: ''
+  args:
+    description: 'Optional additional arguments to `tailscale up`.'
+    required: false
+    default: ''
+  tailscaled-args:
+    description: 'Optional additional arguments to `tailscaled`.'
+    required: false
+    default: ''
+  hostname:
+    description: 'Fixed hostname to use.'
+    required: false
+    default: ''
+  statedir:
+    description: 'Optional state directory to use (if unset, memory state is used).'
+    required: false
+    default: ''
+  timeout:
+    description: 'Timeout for `tailscale up`.'
+    required: false
+    default: '2m'
+
+runs:
+  using: 'node16'
+  main: 'dist/index.js'
