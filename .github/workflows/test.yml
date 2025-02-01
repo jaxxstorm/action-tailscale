@@ -11,7 +11,7 @@ jobs:
   operating-systems:
     strategy:
       matrix:
-        runs-on: ["macos-latest"]
+        runs-on: ["windows-latest", "ubuntu-latest", "macos-latest"]
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -25,3 +25,4 @@ jobs:
           oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
           oauth-client-secret: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
           tags: "tag:ci"
+      - run: tailscale status
