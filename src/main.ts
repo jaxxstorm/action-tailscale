@@ -13,7 +13,7 @@ async function run(): Promise<void> {
     const channelInput = core.getInput('channel') || '';
     let versionInput = core.getInput('version') || '';
     const authKey = core.getInput('authkey') || '';
-    const oauthSecret = core.getInput('oauth-secret') || '';
+    const oauthSecret = core.getInput('oauth-client-secret') || '';
     const tags = core.getInput('tags') || '';
     let sha256sum = core.getInput('sha256sum') || '';
     const additionalArgs = core.getInput('args') || '';

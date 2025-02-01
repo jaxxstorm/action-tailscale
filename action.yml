@@ -12,7 +12,7 @@ inputs:
   oauth-client-id:
     description: 'Your Tailscale OAuth Client ID.'
     required: false
-  oauth-secret:
+  oauth-client-secret:
     description: 'Your Tailscale OAuth Client Secret.'
     required: false
   tags:
