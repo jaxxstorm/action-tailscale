@@ -21,14 +21,6 @@ inputs:
   version:
     description: 'Tailscale version to use. Specify `latest` for the latest stable version.'
     required: true
-  channel:
-    description: 'Tailscale channel to use. Specify `stable` for the latest stable version.'
-    required: false
-    default: 'stable'
-  sha256sum:
-    description: 'Expected SHA256 checksum of the tarball.'
-    required: false
-    default: ''
   args:
     description: 'Optional additional arguments to `tailscale up`.'
     required: false
@@ -39,10 +31,6 @@ inputs:
     default: ''
   hostname:
     description: 'Fixed hostname to use.'
-    required: false
-    default: ''
-  statedir:
-    description: 'Optional state directory to use (if unset, memory state is used).'
     required: false
     default: ''
   timeout:
